@@ -1,0 +1,16 @@
+# git-envdiff
+
+> git-envdiff is a small, open-source (MIT) command-line tool that keeps a project's `.env` and `.env.example` files in sync automatically by installing Git hooks. It is a single Go binary with no runtime dependencies, works with any programming language or framework, reads only environment variable names (never values), and makes no network requests except when the user explicitly runs `git-envdiff update`.
+
+Use it when: a team keeps an `.env.example` template and keeps forgetting to update it when someone adds a variable to their local `.env`, or when a teammate pulls a change and their `.env` is missing the new variable.
+
+Not for: secret management, encryption, schema validation, or replacing `.env` loaders (see dotenvx and varlock for those).
+
+## Docs
+
+- [README](README.md): install, commands, privacy guarantees, FAQ
+- [Guide: keeping .env.example in sync](docs/GUIDE.md): what .env.example is for, manual and automatic approaches, common questions
+- [How it works](docs/HOW_IT_WORKS.md): which Git hooks are used and why, install strategy, what has and hasn't been verified
+- [Comparison](docs/COMPARISON.md): honest comparison with dot_example, clean-dotenv, dotenvx, varlock, dotenv-linter
+- [Contributing](CONTRIBUTING.md): scope rules and development setup
+- [Security policy](SECURITY.md)

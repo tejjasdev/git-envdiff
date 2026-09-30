@@ -1,0 +1,19 @@
+# Build output
+/git-envdiff
+/git-envdiff.exe
+/dist/
+
+# Go
+*.test
+*.out
+/coverage.txt
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Local scratch (never actually produced by this tool, but a natural
+# place to accidentally drop test files while developing)
+/tmp/

@@ -1,0 +1,7 @@
+# Keep shell scripts and Go sources LF on every platform: a CRLF install.sh
+# breaks when piped to sh, and gofmt expects LF.
+* text=auto
+*.sh text eol=lf
+*.go text eol=lf
+go.mod text eol=lf
+*.ps1 text eol=crlf

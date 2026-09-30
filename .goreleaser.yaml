@@ -1,0 +1,85 @@
+# GoReleaser configuration for git-envdiff.
+#
+# v0.1 only uses the parts of this that GitHub Releases needs directly
+# (builds, archives, checksums.txt) — install.sh and install.ps1 consume
+# those. The Homebrew tap and Linux package sections are here for the
+# later phases described in docs/HOW_IT_WORKS.md's distribution roadmap;
+# uncomment them once those channels are actually being published to, so
+# a broken tap/package repo doesn't block a release before then.
+#
+# Docs: https://goreleaser.com
+version: 2
+
+project_name: git-envdiff
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: git-envdiff
+    main: .
+    binary: git-envdiff
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/tejjasdev/git-envdiff/internal/buildinfo.Version={{ .Version }}
+
+archives:
+  - id: git-envdiff
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+release:
+  github:
+    owner: tejjasdev
+    name: git-envdiff
+  # install.sh / install.ps1 are static files, not build artifacts — this
+  # is what makes `.../releases/latest/download/install.sh` work.
+  extra_files:
+    - glob: ./install.sh
+    - glob: ./install.ps1
+
+# --- Later phases (see docs/HOW_IT_WORKS.md, "Distribution: phases") ---
+#
+# brews:
+#   - name: git-envdiff
+#     repository:
+#       owner: tejjasdev
+#       name: homebrew-tap
+#     homepage: "https://github.com/tejjasdev/git-envdiff"
+#     description: "Keep .env and .env.example in sync, automatically, via Git hooks."
+#     license: "MIT"
+#
+# nfpms:
+#   - id: git-envdiff
+#     formats: [deb, rpm, apk, archlinux]
+#     maintainer: "Tejas Chavan <hey.tejjas@gmail.com>"
+#     description: "Keep .env and .env.example in sync, automatically, via Git hooks."
+#     license: "MIT"
