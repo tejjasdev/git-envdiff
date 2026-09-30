@@ -23,6 +23,14 @@ come from the same place as the binary. If you need stronger guarantees,
 build from source (`go install`) and review the code — it is small and has
 no dependencies.
 
+## How releases are built
+
+Release binaries are built by GitHub Actions from a tagged commit using the
+latest patched Go toolchain, not on a developer machine. Every third-party
+action the workflows use is pinned to a full commit SHA, workflow tokens are
+read-only by default, and Dependabot proposes updates to those pins.
+Maintainer practices are in [docs/MAINTAINING.md](docs/MAINTAINING.md).
+
 ## Reporting a vulnerability
 
 Please **do not** open a public GitHub issue for a security vulnerability.

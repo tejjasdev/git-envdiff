@@ -15,6 +15,9 @@ go build -o git-envdiff .
 go test ./...
 ```
 
+CI runs the tests on the latest Go (Linux, macOS, Windows) and on Go 1.22 as the
+minimum supported version.
+
 There are no other dependencies — the entire tool is Go standard library
 only (see "Scope" below for why that's a hard rule, not a preference).
 

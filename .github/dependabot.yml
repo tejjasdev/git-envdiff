@@ -1,10 +1,16 @@
 version: 2
 updates:
+  # Keeps the pinned GitHub Actions in .github/workflows up to date. All
+  # updates are grouped into ONE pull request per month instead of one PR
+  # (and one branch) per action. The Go module has no third-party
+  # dependencies, so there is deliberately no gomod entry.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: monthly
-  - package-ecosystem: gomod
-    directory: "/"
-    schedule:
-      interval: monthly
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns:
+          - "*"
