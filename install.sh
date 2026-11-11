@@ -66,6 +66,13 @@ resolve_tag() {
 	final="$(curl -fsSL -o /dev/null -w '%{url_effective}' "$url")"
 	tag="${final##*/}"
 	[ -n "$tag" ] || die "could not determine the latest release tag"
+	# With no published release GitHub resolves /releases/latest to /releases,
+	# so the last segment is not a tag. The release workflow only tags v*, so
+	# anything not starting with v<digit> (e.g. "releases") is rejected here.
+	case "$tag" in
+	v[0-9]*) ;;
+	*) die "no published release found (resolved tag '$tag'). See https://github.com/${REPO}/releases" ;;
+	esac
 	printf '%s\n' "$tag"
 }
 
