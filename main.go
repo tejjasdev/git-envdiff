@@ -142,16 +142,29 @@ func runHook(args []string) int {
 	event, rest := args[0], args[1:]
 	switch event {
 	case "pre-commit":
-		return hooks.RunPreCommit()
+		return guard(hooks.RunPreCommit)
 	case "pre-push":
-		return hooks.RunPrePush()
+		return guard(hooks.RunPrePush)
 	case "post-merge":
-		return hooks.RunPostMerge(rest)
+		return guard(func() int { return hooks.RunPostMerge(rest) })
 	case "post-checkout":
-		return hooks.RunPostCheckout(rest)
+		return guard(func() int { return hooks.RunPostCheckout(rest) })
 	default:
 		return 0
 	}
+}
+
+// guard runs fn and turns a panic into a one-line warning and exit code 0,
+// so a bug in git-envdiff can never fail the Git command that invoked the
+// hook. Only runHook is guarded; user-invoked subcommands still crash loudly.
+func guard(fn func() int) (code int) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "git-envdiff: internal error (ignored): %v\n", r)
+			code = 0
+		}
+	}()
+	return fn()
 }
 
 func hasFlag(args []string, flag string) bool {
