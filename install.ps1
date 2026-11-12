@@ -45,7 +45,16 @@ function Resolve-Tag {
             if ($resp.Headers.Location) { $location = $resp.Headers.Location.ToString() }
             elseif ($resp.Headers["Location"]) { $location = $resp.Headers["Location"] }
         }
-        if ($location) { return ($location -split "/")[-1] }
+        if ($location) {
+            $tag = ($location -split "/")[-1]
+            # With no published release the redirect lands on .../releases, so
+            # the last segment is not a tag. The release workflow only tags v*,
+            # so anything not starting with v<digit> (e.g. "releases") is rejected.
+            if ($tag -notmatch '^v\d') {
+                throw "No published release found (resolved tag '$tag'). See $GitHubBase/$Repo/releases"
+            }
+            return $tag
+        }
     }
     throw "Could not determine the latest release tag."
 }
