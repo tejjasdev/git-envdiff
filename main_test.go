@@ -111,3 +111,44 @@ func TestHasFlag(t *testing.T) {
 		t.Fatal("did not expect --repo to be found")
 	}
 }
+
+// captureStderr redirects os.Stderr for the duration of fn and returns
+// whatever was written to it.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	fn()
+	w.Close()
+	os.Stderr = orig
+
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	return buf.String()
+}
+
+func TestGuard_PanicBecomesZeroAndWarns(t *testing.T) {
+	var code int
+	errOut := captureStderr(t, func() {
+		code = guard(func() int { panic("boom") })
+	})
+	if code != 0 {
+		t.Errorf("got exit %d, want 0 after a panic", code)
+	}
+	if !strings.Contains(errOut, "internal error (ignored): boom") {
+		t.Errorf("expected panic warning on stderr, got: %q", errOut)
+	}
+}
+
+func TestGuard_PassesThroughExitCode(t *testing.T) {
+	if code := guard(func() int { return 1 }); code != 1 {
+		t.Errorf("got %d, want 1 (deliberate non-zero must survive)", code)
+	}
+	if code := guard(func() int { return 0 }); code != 0 {
+		t.Errorf("got %d, want 0", code)
+	}
+}
