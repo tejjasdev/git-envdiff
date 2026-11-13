@@ -261,3 +261,36 @@ func TestExists(t *testing.T) {
 		t.Fatal("expected false for a directory")
 	}
 }
+
+func TestScan_KeysOnly_NeverBuildsValues(t *testing.T) {
+	dir := t.TempDir()
+	path := write(t, dir, ".env", "SECRET=hunter2\nPLAIN=abc\nQUOTED=\"shh\"\n")
+	rows, err := scan(path, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("got %d rows, want 3", len(rows))
+	}
+	for _, r := range rows {
+		if r.value != "" {
+			t.Errorf("key %q: value was built and stored as %q even though wantValues=false", r.key, r.value)
+		}
+	}
+}
+
+func TestScan_WantValues_StillReadsThem(t *testing.T) {
+	dir := t.TempDir()
+	path := write(t, dir, ".env.example", "SECRET=hunter2\nQUOTED=\"shh\"\n")
+	rows, err := scan(path, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, r := range rows {
+		got[r.key] = r.value
+	}
+	if got["SECRET"] != "hunter2" || got["QUOTED"] != "shh" {
+		t.Fatalf("unexpected values: %+v", got)
+	}
+}

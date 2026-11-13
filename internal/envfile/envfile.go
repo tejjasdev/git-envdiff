@@ -40,7 +40,7 @@ var ErrAlreadyExists = errors.New("file already exists")
 // assignment is one KEY=value line as found while scanning a file.
 type assignment struct {
 	key   string
-	value string // only ever populated for single-line, non-multiline values
+	value string // empty unless scan was called with wantValues=true; then only for single-line, non-multiline values
 }
 
 // scan walks path line by line and returns the first occurrence of each
@@ -58,7 +58,12 @@ type assignment struct {
 //     the one that closes the quote is skipped entirely, and is never
 //     scanned for a new key. This is what keeps a base64 line that
 //     happens to contain "=" from being mistaken for a new variable.
-func scan(path string) ([]assignment, error) {
+//
+// wantValues controls whether value text is built at all. ParseKeys
+// passes false so a real .env's values are never materialised in
+// memory, not even temporarily; ParseKeyValues and CreateFromTemplate
+// pass true and must only ever be given .env.example-style templates.
+func scan(path string, wantValues bool) ([]assignment, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -130,7 +135,7 @@ func scan(path string) ([]assignment, error) {
 		seen[key] = true
 
 		val := ""
-		if !multilineOpen {
+		if wantValues && !multilineOpen {
 			val = unquote(rawValue)
 		}
 		rows = append(rows, assignment{key: key, value: val})
@@ -158,9 +163,10 @@ func unquote(v string) string {
 }
 
 // ParseKeys returns the variable names path defines, in first-seen order.
-// Values are never captured, returned, or retained anywhere.
+// Values are never captured, returned, or retained anywhere: scan runs
+// with wantValues=false, so they are not even built in memory.
 func ParseKeys(path string) ([]string, error) {
-	rows, err := scan(path)
+	rows, err := scan(path, false)
 	if err != nil {
 		return nil, err
 	}
@@ -182,7 +188,7 @@ func ParseKeys(path string) ([]string, error) {
 // A key whose value spans multiple lines (an unclosed quote) is reported
 // as an empty string rather than an incorrect partial value.
 func ParseKeyValues(path string, wanted []string) (map[string]string, error) {
-	rows, err := scan(path)
+	rows, err := scan(path, true)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +335,7 @@ func CreateFromTemplate(path, templatePath string) error {
 	if Exists(path) {
 		return ErrAlreadyExists
 	}
-	rows, err := scan(templatePath)
+	rows, err := scan(templatePath, true)
 	if err != nil {
 		return err
 	}
