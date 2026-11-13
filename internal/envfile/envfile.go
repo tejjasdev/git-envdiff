@@ -61,7 +61,7 @@ type assignment struct {
 //
 // wantValues controls whether a parsed value is kept. ParseKeys passes
 // false, so for key-only scans (every scan of a real .env) no value is
-// stored in the returned rows and unquote is never run. The raw line is
+// stored in the returned rows. The raw line is
 // still read into memory while it is being parsed (the scanner must read
 // it to find the key and track quotes), but nothing derived from the value
 // is kept after the call returns. ParseKeyValues and CreateFromTemplate
@@ -139,7 +139,10 @@ func scan(path string, wantValues bool) ([]assignment, error) {
 
 		val := ""
 		if wantValues && !multilineOpen {
-			val = unquote(rawValue)
+			// Copy the template's text after "=" verbatim (rawValue is
+			// already TrimSpace(m[3])): stripping quotes or a trailing
+			// inline comment could change what dotenv parsers see.
+			val = rawValue
 		}
 		rows = append(rows, assignment{key: key, value: val})
 	}
@@ -147,22 +150,6 @@ func scan(path string, wantValues bool) ([]assignment, error) {
 		return nil, err
 	}
 	return rows, nil
-}
-
-// unquote strips one layer of matching surrounding quotes from a value,
-// and otherwise trims a trailing "  # inline comment" from an unquoted
-// value. It never needs to be exact — it is only used by ParseKeyValues on
-// already-public template values, purely for cosmetic cleanliness.
-func unquote(v string) string {
-	if len(v) >= 2 {
-		if (v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'') {
-			return v[1 : len(v)-1]
-		}
-	}
-	if i := strings.Index(v, " #"); i >= 0 {
-		return strings.TrimSpace(v[:i])
-	}
-	return v
 }
 
 // ParseKeys returns the variable names path defines, in first-seen order.
@@ -188,6 +175,8 @@ func ParseKeys(path string) ([]string, error) {
 // contents are already committed to version control — and never a real
 // .env. It exists for exactly one purpose: copying a template's own
 // (already-public) default values into a freshly created or synced .env.
+// Values are the raw text after "=", copied verbatim (quotes and inline
+// comments preserved).
 //
 // A key whose value spans multiple lines (an unclosed quote) is reported
 // as an empty string rather than an incorrect partial value.

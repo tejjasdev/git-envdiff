@@ -206,7 +206,7 @@ func TestParseKeyValues_OnTemplateOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if values["A"] != "" || values["B"] != "default-value" || values["C"] != "quoted value" {
+	if values["A"] != "" || values["B"] != "default-value" || values["C"] != "\"quoted value\"" {
 		t.Fatalf("unexpected values: %+v", values)
 	}
 	if _, ok := values["MISSING"]; ok {
@@ -290,7 +290,46 @@ func TestScan_WantValues_StillReadsThem(t *testing.T) {
 	for _, r := range rows {
 		got[r.key] = r.value
 	}
-	if got["SECRET"] != "hunter2" || got["QUOTED"] != "shh" {
+	if got["SECRET"] != "hunter2" || got["QUOTED"] != "\"shh\"" {
 		t.Fatalf("unexpected values: %+v", got)
+	}
+}
+
+func TestCreateFromTemplate_PreservesQuotesAndSpecialCharacters(t *testing.T) {
+	dir := t.TempDir()
+	template := "A=1\nTOKEN=\"abc#def\"\nRAW='$HOME/x'\nPAD=\"  keep  \"\nINLINE=foo # a comment\n"
+	templatePath := write(t, dir, ".env.example", template)
+	envPath := filepath.Join(dir, ".env")
+	if err := CreateFromTemplate(envPath, templatePath); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != template {
+		t.Fatalf("got %q, want template copied verbatim %q", data, template)
+	}
+}
+
+func TestAppendKeyValues_PreservesRawValueText(t *testing.T) {
+	dir := t.TempDir()
+	envPath := write(t, dir, ".env", "A=1\n")
+	templatePath := write(t, dir, ".env.example", "A=1\nTOKEN=\"abc#def\"\nRAW='$HOME/x'\nPAD=\"  keep  \"\nINLINE=foo # a comment\n")
+	order := []string{"TOKEN", "RAW", "PAD", "INLINE"}
+	values, err := ParseKeyValues(templatePath, order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendKeyValues(envPath, order, values); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "A=1\nTOKEN=\"abc#def\"\nRAW='$HOME/x'\nPAD=\"  keep  \"\nINLINE=foo # a comment\n"
+	if string(data) != want {
+		t.Fatalf("got %q, want %q", data, want)
 	}
 }
