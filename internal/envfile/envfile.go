@@ -59,9 +59,12 @@ type assignment struct {
 //     scanned for a new key. This is what keeps a base64 line that
 //     happens to contain "=" from being mistaken for a new variable.
 //
-// wantValues controls whether value text is built at all. ParseKeys
-// passes false so a real .env's values are never materialised in
-// memory, not even temporarily; ParseKeyValues and CreateFromTemplate
+// wantValues controls whether a parsed value is kept. ParseKeys passes
+// false, so for key-only scans (every scan of a real .env) no value is
+// stored in the returned rows and unquote is never run. The raw line is
+// still read into memory while it is being parsed (the scanner must read
+// it to find the key and track quotes), but nothing derived from the value
+// is kept after the call returns. ParseKeyValues and CreateFromTemplate
 // pass true and must only ever be given .env.example-style templates.
 func scan(path string, wantValues bool) ([]assignment, error) {
 	f, err := os.Open(path)
@@ -163,8 +166,9 @@ func unquote(v string) string {
 }
 
 // ParseKeys returns the variable names path defines, in first-seen order.
-// Values are never captured, returned, or retained anywhere: scan runs
-// with wantValues=false, so they are not even built in memory.
+// Values are never returned or retained: scan runs with wantValues=false,
+// so no value is stored in its result. (Each line is necessarily read
+// while parsing, but nothing derived from a value is kept afterwards.)
 func ParseKeys(path string) ([]string, error) {
 	rows, err := scan(path, false)
 	if err != nil {
