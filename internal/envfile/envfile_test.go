@@ -340,6 +340,10 @@ func TestAppendBlankKeys_FollowsSymlink(t *testing.T) {
 	if err := os.Chmod(real, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	before, err := os.Stat(real)
+	if err != nil {
+		t.Fatal(err)
+	}
 	link := filepath.Join(dir, ".env.example")
 	if err := os.Symlink(real, link); err != nil {
 		t.Skipf("symlinks not supported here: %v", err)
@@ -357,8 +361,12 @@ func TestAppendBlankKeys_FollowsSymlink(t *testing.T) {
 	if string(data) != "A=1\nNEW=\n" {
 		t.Fatalf("target not updated: %q", data)
 	}
-	if fi, err := os.Stat(real); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("target mode not preserved: %v %v", fi, err)
+	after, err := os.Stat(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Mode() != before.Mode() {
+		t.Fatalf("target mode not preserved: before=%v after=%v", before.Mode(), after.Mode())
 	}
 }
 
