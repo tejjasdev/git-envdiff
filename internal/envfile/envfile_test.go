@@ -333,3 +333,84 @@ func TestAppendKeyValues_PreservesRawValueText(t *testing.T) {
 		t.Fatalf("got %q, want %q", data, want)
 	}
 }
+
+func TestAppendBlankKeys_FollowsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	real := write(t, dir, "real.example", "A=1\n")
+	if err := os.Chmod(real, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, ".env.example")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+	if err := AppendBlankKeys(link, []string{"NEW"}); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("link was replaced by a regular file: mode=%v err=%v", fi, err)
+	}
+	data, err := os.ReadFile(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "A=1\nNEW=\n" {
+		t.Fatalf("target not updated: %q", data)
+	}
+	after, err := os.Stat(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Mode() != before.Mode() {
+		t.Fatalf("target mode not preserved: before=%v after=%v", before.Mode(), after.Mode())
+	}
+}
+
+func TestAppendKeyValues_FollowsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	real := write(t, dir, "real.env", "A=1\n")
+	link := filepath.Join(dir, ".env")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+	if err := AppendKeyValues(link, []string{"NEW"}, map[string]string{"NEW": "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("link was replaced by a regular file: mode=%v err=%v", fi, err)
+	}
+	data, err := os.ReadFile(real)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "A=1\nNEW=x\n" {
+		t.Fatalf("target not updated: %q", data)
+	}
+}
+
+func TestAppendBlankKeys_DanglingSymlinkKeepsOldBehaviour(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(dir, ".env.example")
+	if err := os.Symlink(filepath.Join(dir, "missing"), link); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+	if err := AppendBlankKeys(link, []string{"NEW"}); err != nil {
+		t.Fatal(err)
+	}
+	// Old behaviour for a dangling link: the link itself is replaced by a
+	// regular file containing just the new line.
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("dangling link should be replaced as before: mode=%v err=%v", fi, err)
+	}
+	data, err := os.ReadFile(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "NEW=\n" {
+		t.Fatalf("got %q, want %q", data, "NEW=\n")
+	}
+}
