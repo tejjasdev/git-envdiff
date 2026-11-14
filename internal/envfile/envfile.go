@@ -280,6 +280,14 @@ func appendKeyValues(path string, order []string, values map[string]string) erro
 // changes, and renames within one directory are atomic on every platform
 // git-envdiff targets.
 func atomicAppend(path string, suffix []byte) error {
+	// Resolve symlinks first: the rename below must replace the real file,
+	// not the link — otherwise a linked .env would silently become a
+	// regular file and its target would stop receiving updates. If the
+	// path does not exist yet (or the link dangles), keep the original
+	// path and behave exactly as before.
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
 	dir := filepath.Dir(path)
 
 	var existing []byte
