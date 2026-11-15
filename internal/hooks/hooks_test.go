@@ -449,3 +449,79 @@ func TestRunManual_WithoutTerminalReportsInsteadOfStayingSilent(t *testing.T) {
 		t.Fatal("nothing should be written when there is no terminal to confirm on")
 	}
 }
+
+func TestPrePush_NotSilencedByNoTerminalPreCommit(t *testing.T) {
+	dir := newRepo(t)
+	writeFile(t, dir, ".env", "NEW_KEY=x\n")
+	writeFile(t, dir, ".env.example", "")
+
+	orig := confirmFn
+	t.Cleanup(func() { confirmFn = orig })
+
+	confirmFn = func(string, bool) prompt.Answer { return prompt.AnswerUnavailable }
+	RunPreCommit() // GUI/no terminal: warns once, snoozes
+
+	prePushAsks := 0
+	confirmFn = func(string, bool) prompt.Answer { prePushAsks++; return prompt.AnswerNo }
+	if code := RunPrePush(); code != 0 {
+		t.Fatalf("a declined pre-push must not block, got %d", code)
+	}
+	if prePushAsks != 1 {
+		t.Fatalf("terminal pre-push must still prompt once despite the no-terminal pre-commit, asked=%d", prePushAsks)
+	}
+}
+
+func TestPrePush_StillSilencedByExplicitNoAtPreCommit(t *testing.T) {
+	dir := newRepo(t)
+	writeFile(t, dir, ".env", "NEW_KEY=x\n")
+	writeFile(t, dir, ".env.example", "")
+
+	orig := confirmFn
+	t.Cleanup(func() { confirmFn = orig })
+
+	confirmFn = func(string, bool) prompt.Answer { return prompt.AnswerNo }
+	RunPreCommit() // explicit "No" snoozes the whole direction
+
+	prePushAsks := 0
+	confirmFn = func(string, bool) prompt.Answer { prePushAsks++; return prompt.AnswerNo }
+	RunPrePush()
+	if prePushAsks != 0 {
+		t.Fatalf("explicit No at pre-commit must still silence pre-push for the same diff, asked=%d", prePushAsks)
+	}
+}
+
+func TestPreCommit_NoTerminalWarnsOnlyOncePerDiff(t *testing.T) {
+	dir := newRepo(t)
+	writeFile(t, dir, ".env", "NEW_KEY=x\n")
+	writeFile(t, dir, ".env.example", "")
+
+	asked := 0
+	orig := confirmFn
+	confirmFn = func(string, bool) prompt.Answer { asked++; return prompt.AnswerUnavailable }
+	defer func() { confirmFn = orig }()
+
+	RunPreCommit()
+	RunPreCommit() // same diff, same hook, still no terminal: must not re-warn
+	if asked != 1 {
+		t.Fatalf("expected exactly 1 prompt for an unchanged no-terminal diff, got %d", asked)
+	}
+}
+
+func TestPostMerge_NotSilencedByNoTerminalPostCheckout(t *testing.T) {
+	dir := newRepo(t)
+	writeFile(t, dir, ".env", "")
+	writeFile(t, dir, ".env.example", "NEW_KEY=\n")
+
+	orig := confirmFn
+	t.Cleanup(func() { confirmFn = orig })
+
+	confirmFn = func(string, bool) prompt.Answer { return prompt.AnswerUnavailable }
+	RunPostCheckout([]string{"a", "b", "1"})
+
+	mergeAsks := 0
+	confirmFn = func(string, bool) prompt.Answer { mergeAsks++; return prompt.AnswerNo }
+	RunPostMerge([]string{"0"})
+	if mergeAsks != 1 {
+		t.Fatalf("terminal post-merge must still prompt once despite the no-terminal post-checkout, asked=%d", mergeAsks)
+	}
+}

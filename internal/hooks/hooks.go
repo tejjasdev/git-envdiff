@@ -28,6 +28,11 @@ const (
 	dirPush = "push" // .env -> .env.example: a new local var not yet templated
 	dirPull = "pull" // .env.example -> .env: the template has vars you're missing
 
+	hookPreCommit    = "pre-commit"
+	hookPrePush      = "pre-push"
+	hookPostMerge    = "post-merge"
+	hookPostCheckout = "post-checkout"
+
 	exampleFile = ".env.example"
 	envFileName = ".env"
 
@@ -119,7 +124,7 @@ func RunPreCommit() int {
 	if !ok {
 		return 0
 	}
-	missing, snoozed := pending(p, dirPush)
+	missing, snoozed := pending(p, dirPush, hookPreCommit)
 	if len(missing) == 0 || snoozed {
 		return 0
 	}
@@ -147,7 +152,7 @@ func RunPreCommit() int {
 		markLocal(p, missing)
 	case prompt.AnswerUnavailable:
 		warnf(".env has variable(s) not in .env.example: %s (run `git-envdiff` in a terminal to review)", joinKeys(missing))
-		_ = state.Snooze(p.GitDir, dirPush, fp)
+		_ = state.Snooze(p.GitDir, dirPush+"/"+hookPreCommit, fp) // hook-scoped: a later pre-push from a terminal still asks
 	default: // AnswerNo
 		_ = state.Snooze(p.GitDir, dirPush, fp)
 	}
@@ -181,7 +186,7 @@ func RunPrePush() int {
 	if !ok {
 		return 0
 	}
-	missing, snoozed := pending(p, dirPush)
+	missing, snoozed := pending(p, dirPush, hookPrePush)
 	if len(missing) == 0 || snoozed {
 		return 0
 	}
@@ -200,7 +205,7 @@ func RunPrePush() int {
 		markLocal(p, missing)
 	case prompt.AnswerUnavailable:
 		warnf("heads-up: .env has variable(s) not in .env.example: %s (run `git-envdiff` in a terminal to review)", joinKeys(missing))
-		_ = state.Snooze(p.GitDir, dirPush, fp)
+		_ = state.Snooze(p.GitDir, dirPush+"/"+hookPrePush, fp)
 	default:
 		_ = state.Snooze(p.GitDir, dirPush, fp)
 	}
@@ -213,7 +218,7 @@ func RunPrePush() int {
 // fast-forward, true-merge, and no-local-commits-rebase forms of `git pull`.
 func RunPostMerge(_ []string) int {
 	// The single argument is "1" for a squash merge, "0" otherwise — irrelevant here.
-	return runPullSide()
+	return runPullSide(hookPostMerge)
 }
 
 // RunPostCheckout handles the hook Git runs after checkout, including
@@ -228,15 +233,15 @@ func RunPostCheckout(args []string) int {
 	if args[0] == args[1] {
 		return 0 // HEAD didn't move
 	}
-	return runPullSide()
+	return runPullSide(hookPostCheckout)
 }
 
-func runPullSide() int {
+func runPullSide(hook string) int {
 	p, ok := prepare()
 	if !ok {
 		return 0
 	}
-	missing, snoozed := pending(p, dirPull)
+	missing, snoozed := pending(p, dirPull, hook)
 	if len(missing) == 0 || snoozed {
 		return 0
 	}
@@ -256,7 +261,7 @@ func runPullSide() int {
 		warnf("added %s to .env. Fill in real values for any that are blank.", joinKeys(missing))
 	case prompt.AnswerUnavailable:
 		warnf(".env.example has variable(s) missing from your .env: %s (run `git-envdiff` in a terminal to sync)", joinKeys(missing))
-		_ = state.Snooze(p.GitDir, dirPull, fp)
+		_ = state.Snooze(p.GitDir, dirPull+"/"+hook, fp) // hook-scoped: the other pull-side hook from a terminal still asks
 	default:
 		_ = state.Snooze(p.GitDir, dirPull, fp)
 	}
@@ -350,7 +355,7 @@ func RunManual() int {
 // pending computes the diff for one direction and whether it is snoozed.
 // When there is no diff it also forgets that direction's old snoozes, so
 // a snooze only lives as long as the exact diff it was made for.
-func pending(p Paths, direction string) (missing []string, snoozed bool) {
+func pending(p Paths, direction, hook string) (missing []string, snoozed bool) {
 	missing, err := missingKeys(p, direction)
 	if err != nil {
 		silentFail(err)
@@ -360,7 +365,11 @@ func pending(p Paths, direction string) (missing []string, snoozed bool) {
 		_ = state.ClearSnoozed(p.GitDir, direction)
 		return nil, false
 	}
-	return missing, state.IsSnoozed(p.GitDir, direction, state.Fingerprint(direction, missing))
+	fp := state.Fingerprint(direction, missing)
+	// snoozed if the whole direction was explicitly declined ("push <fp>")
+	// OR only this hook ran without a terminal ("push/pre-commit <fp>")
+	return missing, state.IsSnoozed(p.GitDir, direction, fp) ||
+		state.IsSnoozed(p.GitDir, direction+"/"+hook, fp)
 }
 
 // missingKeys computes the diff for one direction. On the push direction

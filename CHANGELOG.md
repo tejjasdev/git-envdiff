@@ -6,6 +6,14 @@ intends to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- A hook running without a terminal (GUI Git clients, scripts) now snoozes
+  only itself (`push/pre-commit`, `pull/post-checkout`, …) instead of the
+  whole direction, so a later `git push` / `git pull` from a real terminal
+  still prompts. An explicit "No" still snoozes the whole direction, and
+  old snooze files keep working unchanged.
+
 ## [0.1.0] - 2026-09-30
 
 ### Added

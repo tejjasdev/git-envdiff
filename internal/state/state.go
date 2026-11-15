@@ -83,10 +83,10 @@ func ClearSnoozed(gitDir, direction string) error {
 		}
 		return err
 	}
-	prefix := direction + " "
 	kept := lines[:0:0]
 	for _, l := range lines {
-		if !strings.HasPrefix(l, prefix) {
+		// clear the shared key ("push <fp>") and hook-scoped keys ("push/pre-commit <fp>")
+		if !strings.HasPrefix(l, direction+" ") && !strings.HasPrefix(l, direction+"/") {
 			kept = append(kept, l)
 		}
 	}
