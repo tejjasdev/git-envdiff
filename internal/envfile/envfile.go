@@ -43,6 +43,23 @@ type assignment struct {
 	value string // empty unless scan was called with wantValues=true; then only for single-line, non-multiline values
 }
 
+// unescapedQuotes counts quote characters q in s that are not escaped.
+// Inside double quotes a backslash escapes the next byte (so \" does not
+// count); single quotes have no escapes (shell semantics).
+func unescapedQuotes(s string, q byte) int {
+	n := 0
+	for i := 0; i < len(s); i++ {
+		if q == '"' && s[i] == '\\' {
+			i++
+			continue
+		}
+		if s[i] == q {
+			n++
+		}
+	}
+	return n
+}
+
 // scan walks path line by line and returns the first occurrence of each
 // assigned key, in the order it first appears. Later re-assignments of an
 // already-seen key are ignored: git-envdiff only cares whether a key is
@@ -58,6 +75,8 @@ type assignment struct {
 //     the one that closes the quote is skipped entirely, and is never
 //     scanned for a new key. This is what keeps a base64 line that
 //     happens to contain "=" from being mistaken for a new variable.
+//     Quote counting is escape-aware for double quotes (\" inside a
+//     value does not open or close); single quotes have no escapes.
 //
 // wantValues controls whether a parsed value is kept. ParseKeys passes
 // false, so for key-only scans (every scan of a real .env) no value is
@@ -95,7 +114,7 @@ func scan(path string, wantValues bool) ([]assignment, error) {
 		}
 
 		if inMultiline {
-			if strings.IndexByte(line, quoteChar) >= 0 {
+			if unescapedQuotes(line, quoteChar) > 0 {
 				inMultiline = false
 			}
 			continue
@@ -117,15 +136,15 @@ func scan(path string, wantValues bool) ([]assignment, error) {
 		if len(rawValue) > 0 && (rawValue[0] == '"' || rawValue[0] == '\'') {
 			q := rawValue[0]
 			rest := rawValue[1:]
-			// An even number of matching quote characters after the
-			// opening one means it was never closed on this line (the
-			// opening quote is the odd one out), so the value continues
-			// on following lines.
-			//
-			// Known limitation: this does not understand backslash-escaped
-			// quotes inside a value. That's an accepted simplification —
-			// see the package doc comment.
-			if strings.Count(rest, string(q))%2 == 0 {
+			// An even number of unescaped matching quote characters
+			// after the opening one means it was never closed on this
+			// line (the opening quote is the odd one out), so the value
+			// continues on following lines. Quote counting is
+			// escape-aware for double quotes (\" does not count);
+			// single quotes have no escapes. A quote that is never
+			// closed at all still swallows the rest of the file —
+			// tracked as GE-13 (#17), not handled here.
+			if unescapedQuotes(rest, q)%2 == 0 {
 				multilineOpen = true
 				quoteChar = q
 				inMultiline = true
