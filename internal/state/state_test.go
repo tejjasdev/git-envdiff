@@ -88,3 +88,36 @@ func TestDisabledFlag(t *testing.T) {
 		t.Fatalf("re-enabling when already enabled must not fail: %v", err)
 	}
 }
+
+func TestClearSnoozed_AlsoClearsHookScopedLines(t *testing.T) {
+	dir := t.TempDir()
+	fpPush := Fingerprint("push", []string{"A"})
+	fpPull := Fingerprint("pull", []string{"B"})
+
+	if err := Snooze(dir, "push/pre-commit", fpPush); err != nil {
+		t.Fatal(err)
+	}
+	if err := Snooze(dir, "pull/post-merge", fpPull); err != nil {
+		t.Fatal(err)
+	}
+	if !IsSnoozed(dir, "push/pre-commit", fpPush) || !IsSnoozed(dir, "pull/post-merge", fpPull) {
+		t.Fatal("expected hook-scoped snoozes to register")
+	}
+
+	if err := ClearSnoozed(dir, "push"); err != nil {
+		t.Fatal(err)
+	}
+	if IsSnoozed(dir, "push/pre-commit", fpPush) {
+		t.Fatal("hook-scoped push snooze must be cleared together with the direction")
+	}
+	if !IsSnoozed(dir, "pull/post-merge", fpPull) {
+		t.Fatal("clearing push must not touch pull lines")
+	}
+
+	if err := ClearSnoozed(dir, "pull"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, snoozeFileName)); err == nil {
+		t.Fatal("snooze file should be removed once empty")
+	}
+}

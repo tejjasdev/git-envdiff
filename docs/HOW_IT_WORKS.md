@@ -173,7 +173,14 @@ local to your clone):
   doesn't ask again on every subsequent commit or pull. It stops applying
   automatically as soon as the set of missing keys changes — and it is
   forgotten entirely once that difference disappears, so if the same
-  difference comes back later you are asked again.
+  difference comes back later you are asked again. There are two kinds:
+  an explicit "No" at a prompt snoozes the whole direction (pre-commit and
+  pre-push share `push`, post-merge and post-checkout share `pull`), so one
+  declined diff is not asked about again by either hook of that direction.
+  A hook that ran without a terminal (GUI Git clients, scripts) snoozes
+  only itself (`push/pre-commit`, `pull/post-checkout`, …), so a different
+  hook of the same direction run later from a real terminal — e.g. `git push`
+  after a commit made in a GUI — still asks.
 - **A local-only list** — variable names you've explicitly marked (the `l`
   answer) as never worth proposing for `.env.example`. `.env` legitimately
   holds machine-specific values that don't belong in a shared template,
