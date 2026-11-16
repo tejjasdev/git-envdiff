@@ -566,8 +566,8 @@ func TestRunManual_UnreadableEnvIsNotReportedAsInSync(t *testing.T) {
 	if strings.Contains(out, "in sync") {
 		t.Fatalf("must not claim 'in sync' when the comparison failed, stdout=%q", out)
 	}
-	if !strings.Contains(errOut, ".env") {
-		t.Fatalf("stderr must name the failing file (.env), got %q", errOut)
+	if !strings.Contains(errOut, "example: .env: ") {
+		t.Fatalf("stderr must name the wrapped failing file after the prefix (\\\"example: .env: \\\"), got %q", errOut)
 	}
 }
 
@@ -584,8 +584,8 @@ func TestRunManual_UnreadableExampleIsNotReportedAsInSync(t *testing.T) {
 	if strings.Contains(out, "in sync") {
 		t.Fatalf("must not claim 'in sync' when the comparison failed, stdout=%q", out)
 	}
-	if !strings.Contains(errOut, ".env.example") {
-		t.Fatalf("stderr must name the failing file (.env.example), got %q", errOut)
+	if !strings.Contains(errOut, "example: .env.example: ") {
+		t.Fatalf("stderr must name the wrapped failing file after the prefix (\\\"example: .env.example: \\\"), got %q", errOut)
 	}
 }
 
