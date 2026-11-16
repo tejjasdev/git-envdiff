@@ -1,6 +1,8 @@
 package hooks
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -523,5 +525,81 @@ func TestPostMerge_NotSilencedByNoTerminalPostCheckout(t *testing.T) {
 	RunPostMerge([]string{"0"})
 	if mergeAsks != 1 {
 		t.Fatalf("terminal post-merge must still prompt once despite the no-terminal post-checkout, asked=%d", mergeAsks)
+	}
+}
+
+// captureOutErr runs fn with os.Stdout/os.Stderr redirected and returns
+// the exit code plus both captured streams (same os.Pipe approach as
+// captureStdout in main_test.go, local to this package).
+func captureOutErr(t *testing.T, fn func() int) (code int, out, errOut string) {
+	t.Helper()
+	origOut, origErr := os.Stdout, os.Stderr
+	rOut, wOut, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rErr, wErr, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout, os.Stderr = wOut, wErr
+	code = fn()
+	wOut.Close()
+	wErr.Close()
+	os.Stdout, os.Stderr = origOut, origErr
+	var bOut, bErr bytes.Buffer
+	io.Copy(&bOut, rOut)
+	io.Copy(&bErr, rErr)
+	return code, bOut.String(), bErr.String()
+}
+
+func TestRunManual_UnreadableEnvIsNotReportedAsInSync(t *testing.T) {
+	dir := newRepo(t)
+	writeFile(t, dir, ".env.example", "A=1\n")
+	writeFile(t, dir, ".env", "A=1\nBIG="+strings.Repeat("A", 11<<20)+"\n") // >10MB line: scanner error
+
+	withAnswer(t, prompt.AnswerNo)
+	code, out, errOut := captureOutErr(t, RunManual)
+	if code != 1 {
+		t.Fatalf("RunManual returned %d, want 1 when a file cannot be scanned", code)
+	}
+	if strings.Contains(out, "in sync") {
+		t.Fatalf("must not claim 'in sync' when the comparison failed, stdout=%q", out)
+	}
+	if !strings.Contains(errOut, ".env") {
+		t.Fatalf("stderr must name the failing file (.env), got %q", errOut)
+	}
+}
+
+func TestRunManual_UnreadableExampleIsNotReportedAsInSync(t *testing.T) {
+	dir := newRepo(t)
+	writeFile(t, dir, ".env", "A=1\n")
+	writeFile(t, dir, ".env.example", "A=1\nBIG="+strings.Repeat("A", 11<<20)+"\n")
+
+	withAnswer(t, prompt.AnswerNo)
+	code, out, errOut := captureOutErr(t, RunManual)
+	if code != 1 {
+		t.Fatalf("RunManual returned %d, want 1 when a file cannot be scanned", code)
+	}
+	if strings.Contains(out, "in sync") {
+		t.Fatalf("must not claim 'in sync' when the comparison failed, stdout=%q", out)
+	}
+	if !strings.Contains(errOut, ".env.example") {
+		t.Fatalf("stderr must name the failing file (.env.example), got %q", errOut)
+	}
+}
+
+func TestRunPreCommit_OversizedEnvLineWarnsAndExitsZero(t *testing.T) {
+	dir := newRepo(t)
+	writeFile(t, dir, ".env.example", "A=1\n")
+	writeFile(t, dir, ".env", "A=1\nBIG="+strings.Repeat("A", 11<<20)+"\n")
+
+	withAnswer(t, prompt.AnswerNo)
+	code, _, errOut := captureOutErr(t, RunPreCommit)
+	if code != 0 {
+		t.Fatalf("hook mode must keep exit 0, got %d", code)
+	}
+	if !strings.Contains(errOut, "internal error (ignored)") {
+		t.Fatalf("hook mode must warn via silentFail, stderr=%q", errOut)
 	}
 }

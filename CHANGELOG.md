@@ -8,6 +8,13 @@ intends to follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Manual `git-envdiff` now exits 1 with a stderr error naming the file when
+  `.env` / `.env.example` cannot be read (e.g. a line over the 10 MB scanner
+  limit) instead of wrongly reporting "in sync". Hook mode is unchanged:
+  still warns and exits 0.
+
+### Fixed
+
 - A hook running without a terminal (GUI Git clients, scripts) now snoozes
   only itself (`push/pre-commit`, `pull/post-checkout`, …) instead of the
   whole direction, so a later `git push` / `git pull` from a real terminal
