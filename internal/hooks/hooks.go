@@ -309,7 +309,12 @@ func RunManual() int {
 
 	found := false
 
-	if missing, err := missingKeys(p, dirPush); err == nil && len(missing) > 0 {
+	missing, err := missingKeys(p, dirPush)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "git-envdiff: could not compare .env and .env.example: %v\n", err)
+		return 1
+	}
+	if len(missing) > 0 {
 		found = true
 		switch ask(missing, dirPush, true) {
 		case prompt.AnswerYes:
@@ -327,11 +332,20 @@ func RunManual() int {
 		}
 	}
 
-	if missing, err := missingKeys(p, dirPull); err == nil && len(missing) > 0 {
+	missing, err = missingKeys(p, dirPull)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "git-envdiff: could not compare .env and .env.example: %v\n", err)
+		return 1
+	}
+	if len(missing) > 0 {
 		found = true
 		switch ask(missing, dirPull, false) {
 		case prompt.AnswerYes:
-			values, _ := envfile.ParseKeyValues(p.example(), missing)
+			values, err := envfile.ParseKeyValues(p.example(), missing)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "git-envdiff: could not read .env.example: %v\n", err)
+				return 1
+			}
 			if err := envfile.AppendKeyValues(p.env(), missing, values); err != nil {
 				silentFail(err)
 			} else {
@@ -384,11 +398,11 @@ func missingKeys(p Paths, direction string) ([]string, error) {
 
 	fromKeys, err := envfile.ParseKeys(fromPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", filepath.Base(fromPath), err)
 	}
 	toKeys, err := envfile.ParseKeys(toPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", filepath.Base(toPath), err)
 	}
 	missing := envfile.Diff(fromKeys, toKeys)
 
