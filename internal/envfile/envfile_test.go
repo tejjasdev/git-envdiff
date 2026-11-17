@@ -71,6 +71,35 @@ func TestParseKeys(t *testing.T) {
 			content: "",
 			want:    nil,
 		},
+		{
+			name:    "odd number of escaped quotes does not start a multi-line value",
+			content: "A=1\n" + `MSG="He said \"hi"` + "\nLATER=1\n",
+			want:    []string{"A", "MSG", "LATER"},
+		},
+		{
+			name: "escaped quote inside a real multi-line value does not close it early",
+			content: "PK=\"-----BEGIN\n" +
+				`AAAA\"BBB` + "\n" +
+				"FAKE=notakey\n" +
+				`-----END"` + "\n" +
+				"NEXT=1\n",
+			want: []string{"PK", "NEXT"},
+		},
+		{
+			name:    "even number of escaped quotes, closed value",
+			content: `J="{\"a\":1}"` + "\nNEXT=1\n",
+			want:    []string{"J", "NEXT"},
+		},
+		{
+			name:    "escaped backslash before closing quote",
+			content: `P="C:\\dir\\"` + "\nNEXT=1\n",
+			want:    []string{"P", "NEXT"},
+		},
+		{
+			name:    "multiline value without escapes still skipped",
+			content: "PK=\"-----BEGIN\nAAAA====\n-----END\"\nNEXT=1\n",
+			want:    []string{"PK", "NEXT"},
+		},
 	}
 
 	for _, tc := range cases {
@@ -412,5 +441,25 @@ func TestAppendBlankKeys_DanglingSymlinkKeepsOldBehaviour(t *testing.T) {
 	}
 	if string(data) != "NEW=\n" {
 		t.Fatalf("got %q, want %q", data, "NEW=\n")
+	}
+}
+
+func TestUnescapedQuotes(t *testing.T) {
+	cases := []struct {
+		s    string
+		q    byte
+		want int
+	}{
+		{`a"b`, '"', 1},
+		{`a\"b`, '"', 0},
+		{`"`, '"', 1},
+		{`a\\"b`, '"', 1},   // escaped backslash, then an unescaped quote
+		{`'it's'`, '\'', 3}, // single quotes have no escapes
+		{`""`, '\'', 0},
+	}
+	for _, tc := range cases {
+		if got := unescapedQuotes(tc.s, tc.q); got != tc.want {
+			t.Errorf("unescapedQuotes(%q, %q) = %d, want %d", tc.s, tc.q, got, tc.want)
+		}
 	}
 }
