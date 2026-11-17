@@ -1,10 +1,12 @@
 package envfile
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func write(t *testing.T, dir, name, content string) string {
@@ -17,6 +19,7 @@ func write(t *testing.T, dir, name, content string) string {
 }
 
 func TestParseKeys(t *testing.T) {
+	bs := string(rune(92)) // the single backslash char, built by concatenation not retyped
 	cases := []struct {
 		name    string
 		content string
@@ -99,6 +102,56 @@ func TestParseKeys(t *testing.T) {
 			name:    "multiline value without escapes still skipped",
 			content: "PK=\"-----BEGIN\nAAAA====\n-----END\"\nNEXT=1\n",
 			want:    []string{"PK", "NEXT"},
+		},
+		{
+			name:    "unclosed double quote does not swallow the rest of the file",
+			content: "A=1\nPASSWORD=\"abc\nK1=1\nK2=2\nK3=3\n",
+			want:    []string{"A", "PASSWORD", "K1", "K2", "K3"},
+		},
+		{
+			name:    "unclosed single quote does not swallow the rest of the file",
+			content: "A=1\nB='abc\nC=1\n",
+			want:    []string{"A", "B", "C"},
+		},
+		{
+			name:    "unclosed quote on the first line",
+			content: "B=\"x\nC=1\nD=2\n",
+			want:    []string{"B", "C", "D"},
+		},
+		{
+			name:    "windows path ending in backslash before the closing quote",
+			content: "A=1\nDIR=\"C:" + bs + "logs" + bs + "\"\nLATER=1\n",
+			want:    []string{"A", "DIR", "LATER"},
+		},
+		{
+			name:    "BOM on first line with unclosed quote",
+			content: "\ufeffA=\"x\nB=1\n",
+			want:    []string{"A", "B"},
+		},
+		{
+			name:    "CRLF line endings with unclosed quote",
+			content: "A=\"x\r\nB=1\r\n",
+			want:    []string{"A", "B"},
+		},
+		{
+			name:    "duplicate key whose second occurrence has an unclosed quote",
+			content: "A=1\nA=\"x\nB=1\n",
+			want:    []string{"A", "B"},
+		},
+		{
+			name:    "unclosed quote on the very last line",
+			content: "A=1\nB=\"x",
+			want:    []string{"A", "B"},
+		},
+		{
+			// Single quotes have no escapes, so the backslash in 'it\'s'
+			// does not escape the middle quote: the value opens a
+			// "multi-line" that is never closed, which the GE-13 recovery
+			// pins back to single-line — so NEXT is still found.
+			// Expected keys derived by running the fixed scanner.
+			name:    "single-quoted value containing a backslash-quote",
+			content: "X='it" + bs + "'s'\nNEXT=1\n",
+			want:    []string{"X", "NEXT"},
 		},
 	}
 
@@ -445,6 +498,7 @@ func TestAppendBlankKeys_DanglingSymlinkKeepsOldBehaviour(t *testing.T) {
 }
 
 func TestUnescapedQuotes(t *testing.T) {
+	bs := string(rune(92)) // the single backslash char
 	cases := []struct {
 		s    string
 		q    byte
@@ -453,13 +507,29 @@ func TestUnescapedQuotes(t *testing.T) {
 		{`a"b`, '"', 1},
 		{`a\"b`, '"', 0},
 		{`"`, '"', 1},
-		{`a\\"b`, '"', 1},   // escaped backslash, then an unescaped quote
-		{`'it's'`, '\'', 3}, // single quotes have no escapes
+		{`a\\"b`, '"', 1},             // escaped backslash, then an unescaped quote
+		{"'it" + bs + "'s'", '\'', 3}, // single quotes have no escapes: BS does not escape, all 3 quotes count
 		{`""`, '\'', 0},
 	}
 	for _, tc := range cases {
 		if got := unescapedQuotes(tc.s, tc.q); got != tc.want {
 			t.Errorf("unescapedQuotes(%q, %q) = %d, want %d", tc.s, tc.q, got, tc.want)
 		}
+	}
+}
+
+func TestScan_ManyStrayQuotesTerminates(t *testing.T) {
+	var sb strings.Builder
+	for i := 0; i < 2001; i++ {
+		fmt.Fprintf(&sb, "K%d=\"x\n", i) // every line opens a quote that is never closed
+	}
+	path := write(t, t.TempDir(), ".env", sb.String())
+
+	start := time.Now()
+	if _, err := ParseKeys(path); err != nil {
+		t.Fatalf("ParseKeys: %v", err)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("scanning 2001 stray-quote lines took %v, want well under 2s", d)
 	}
 }
