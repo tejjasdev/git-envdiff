@@ -8,6 +8,7 @@ intends to follow [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- An unclosed quote in `.env` (e.g. `PASSWORD="abc`) no longer makes the scanner treat the rest of the file as a multi-line value and silently skip later variables; the opener is recovered as an ordinary single-line value.
 - Quote tracking in the `.env` scanner is now escape-aware for double quotes: an escaped quote (`\"`) inside a value no longer makes the parser treat the rest of the file as a multi-line value and silently skip later variables.
 - Manual `git-envdiff` now exits 1 with a stderr error naming the file when
   `.env` / `.env.example` cannot be read (e.g. a line over the 10 MB scanner

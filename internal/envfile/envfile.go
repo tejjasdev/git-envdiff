@@ -60,6 +60,11 @@ func unescapedQuotes(s string, q byte) int {
 	return n
 }
 
+// maxScanPasses bounds how many stray unclosed quotes scan recovers from:
+// each pass pins one more opener line as single-line, so even a
+// pathological file terminates instead of hanging.
+const maxScanPasses = 100
+
 // scan walks path line by line and returns the first occurrence of each
 // assigned key, in the order it first appears. Later re-assignments of an
 // already-seen key are ignored: git-envdiff only cares whether a key is
@@ -77,6 +82,12 @@ func unescapedQuotes(s string, q byte) int {
 //     happens to contain "=" from being mistaken for a new variable.
 //     Quote counting is escape-aware for double quotes (\" inside a
 //     value does not open or close); single quotes have no escapes.
+//   - if the file ends while such a value is still open, that opener was
+//     not a real multi-line start: scan re-runs with the opener line
+//     forced to single-line (bounded by maxScanPasses), so one stray
+//     quote cannot hide the rest of the file. Accepted limit: an EVEN
+//     number of stray quotes pairs up (the second looks like a closer);
+//     only an opener still open at EOF is recovered.
 //
 // wantValues controls whether a parsed value is kept. ParseKeys passes
 // false, so for key-only scans (every scan of a real .env) no value is
@@ -86,9 +97,31 @@ func unescapedQuotes(s string, q byte) int {
 // is kept after the call returns. ParseKeyValues and CreateFromTemplate
 // pass true and must only ever be given .env.example-style templates.
 func scan(path string, wantValues bool) ([]assignment, error) {
+	// singleLine holds 1-based line numbers whose opening quote must NOT
+	// start a multi-line value (on a previous pass that quote was never
+	// closed before EOF).
+	singleLine := map[int]bool{}
+	var rows []assignment
+	var err error
+	for pass := 0; pass < maxScanPasses; pass++ {
+		var unclosedAt int
+		rows, unclosedAt, err = scanOnce(path, wantValues, singleLine)
+		if err != nil || unclosedAt == 0 {
+			return rows, err
+		}
+		singleLine[unclosedAt] = true
+	}
+	return rows, err // cap reached: return the last pass's result as is
+}
+
+// scanOnce is one pass over path. Besides the parsed rows it returns the
+// 1-based line number where a still-open multi-line value started (0 when
+// the file ends with nothing open), so scan can pin that line as
+// single-line and try again.
+func scanOnce(path string, wantValues bool, singleLine map[int]bool) ([]assignment, int, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer f.Close()
 
@@ -104,9 +137,12 @@ func scan(path string, wantValues bool) ([]assignment, error) {
 
 	inMultiline := false
 	var quoteChar byte
+	openedAt := 0
+	lineNo := 0
 	first := true
 
 	for sc.Scan() {
+		lineNo++
 		line := sc.Text()
 		if first {
 			line = strings.TrimPrefix(line, "\ufeff") // strip a UTF-8 BOM, if present
@@ -116,6 +152,7 @@ func scan(path string, wantValues bool) ([]assignment, error) {
 		if inMultiline {
 			if unescapedQuotes(line, quoteChar) > 0 {
 				inMultiline = false
+				openedAt = 0
 			}
 			continue
 		}
@@ -133,7 +170,7 @@ func scan(path string, wantValues bool) ([]assignment, error) {
 		rawValue := strings.TrimSpace(m[3])
 
 		multilineOpen := false
-		if len(rawValue) > 0 && (rawValue[0] == '"' || rawValue[0] == '\'') {
+		if len(rawValue) > 0 && (rawValue[0] == '"' || rawValue[0] == '\'') && !singleLine[lineNo] {
 			q := rawValue[0]
 			rest := rawValue[1:]
 			// An even number of unescaped matching quote characters
@@ -141,13 +178,14 @@ func scan(path string, wantValues bool) ([]assignment, error) {
 			// line (the opening quote is the odd one out), so the value
 			// continues on following lines. Quote counting is
 			// escape-aware for double quotes (\" does not count);
-			// single quotes have no escapes. A quote that is never
-			// closed at all still swallows the rest of the file —
-			// tracked as GE-13 (#17), not handled here.
+			// single quotes have no escapes. If no later line ever
+			// closes it, the scan loop pins this line as single-line
+			// and re-scans.
 			if unescapedQuotes(rest, q)%2 == 0 {
 				multilineOpen = true
 				quoteChar = q
 				inMultiline = true
+				openedAt = lineNo
 			}
 		}
 
@@ -166,9 +204,12 @@ func scan(path string, wantValues bool) ([]assignment, error) {
 		rows = append(rows, assignment{key: key, value: val})
 	}
 	if err := sc.Err(); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return rows, nil
+	if inMultiline {
+		return rows, openedAt, nil
+	}
+	return rows, 0, nil
 }
 
 // ParseKeys returns the variable names path defines, in first-seen order.
