@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -601,5 +602,139 @@ func TestRunPreCommit_OversizedEnvLineWarnsAndExitsZero(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "internal error (ignored)") {
 		t.Fatalf("hook mode must warn via silentFail, stderr=%q", errOut)
+	}
+}
+
+func TestRunPreCommit_DoesNotStageUnrelatedUnstagedExampleEdits(t *testing.T) {
+	dir := newRepo(t)
+	writeFile(t, dir, ".env.example", "A=\n")
+	writeFile(t, dir, ".env", "A=1\nNEWK=v\n")
+	git(t, dir, "add", ".env.example")
+	git(t, dir, "commit", "-qm", "init")
+
+	writeFile(t, dir, ".env.example", "A=\n# WIP\n") // unrelated unstaged edit
+	writeFile(t, dir, "f", "x\n")
+	git(t, dir, "add", "f")
+
+	withAnswer(t, prompt.AnswerYes)
+	code, _, errOut := captureOutErr(t, RunPreCommit)
+	if code != 0 {
+		t.Fatalf("RunPreCommit returned %d, want 0", code)
+	}
+	git(t, dir, "commit", "-qm", "wip")
+
+	head := git(t, dir, "show", "HEAD:.env.example")
+	if strings.Contains(head, "WIP") || strings.Contains(head, "NEWK") {
+		t.Fatalf("HEAD:.env.example must contain neither WIP nor NEWK, got %q", head)
+	}
+	work := readFile(t, dir, ".env.example")
+	if !strings.Contains(work, "WIP") || !strings.Contains(work, "NEWK=") {
+		t.Fatalf("working .env.example must have both WIP and NEWK=, got %q", work)
+	}
+	if !strings.Contains(errOut, "NOT staged") {
+		t.Fatalf("errOut must mention NOT staged, got %q", errOut)
+	}
+}
+
+func TestRunPreCommit_StagesSymlinkTargetInsideRepo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Git symlink handling on Windows depends on core.symlinks")
+	}
+	dir := newRepo(t)
+	if err := os.Mkdir(filepath.Join(dir, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "docs/env.template", "A=\n")
+	if err := os.Symlink("docs/env.template", filepath.Join(dir, ".env.example")); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+	writeFile(t, dir, ".env", "NEWK=v\n")
+	git(t, dir, "add", ".env.example", "docs")
+	git(t, dir, "commit", "-qm", "init")
+	writeFile(t, dir, "f", "x\n")
+	git(t, dir, "add", "f")
+
+	withAnswer(t, prompt.AnswerYes)
+	code, _, errOut := captureOutErr(t, RunPreCommit)
+	if code != 0 {
+		t.Fatalf("RunPreCommit returned %d, want 0", code)
+	}
+	git(t, dir, "commit", "-qm", "c")
+
+	head := git(t, dir, "show", "HEAD:docs/env.template")
+	if !strings.Contains(head, "NEWK=") {
+		t.Fatalf("HEAD:docs/env.template must contain NEWK=, got %q", head)
+	}
+	tree := git(t, dir, "ls-tree", "HEAD", ".env.example")
+	if !strings.HasPrefix(tree, "120000") {
+		t.Fatalf(".env.example must still be a symlink (mode 120000) in HEAD, got %q", tree)
+	}
+	if !strings.Contains(errOut, "included it in this commit") {
+		t.Fatalf("errOut must say the fix was included in this commit, got %q", errOut)
+	}
+}
+
+func TestRunPreCommit_SymlinkOutsideRepoIsNotStaged(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Git symlink handling on Windows depends on core.symlinks")
+	}
+	dir := newRepo(t)
+	outside := t.TempDir()
+	outsideFile := filepath.Join(outside, "env.template")
+	if err := os.WriteFile(outsideFile, []byte("A=\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideFile, filepath.Join(dir, ".env.example")); err != nil {
+		t.Skipf("symlinks not supported here: %v", err)
+	}
+	writeFile(t, dir, ".env", "NEWK=v\n")
+	git(t, dir, "add", ".env.example")
+	git(t, dir, "commit", "-qm", "init")
+	writeFile(t, dir, "f", "x\n")
+	git(t, dir, "add", "f")
+
+	withAnswer(t, prompt.AnswerYes)
+	code, _, errOut := captureOutErr(t, RunPreCommit)
+	if code != 0 {
+		t.Fatalf("RunPreCommit returned %d, want 0", code)
+	}
+	if !strings.Contains(errOut, "outside this repository") {
+		t.Fatalf("errOut must mention outside this repository, got %q", errOut)
+	}
+	data, err := os.ReadFile(outsideFile)
+	if err != nil || !strings.Contains(string(data), "NEWK=") {
+		t.Fatalf("outside target file must have received NEWK=, got %q err=%v", data, err)
+	}
+	staged := strings.TrimSpace(git(t, dir, "diff", "--cached", "--name-only"))
+	if staged != "f" {
+		t.Fatalf("only f must be staged, got %q", staged)
+	}
+}
+
+func TestRunPreCommit_StagesFixWhenExampleFullyStaged(t *testing.T) {
+	dir := newRepo(t)
+	writeFile(t, dir, ".env.example", "A=\n")
+	writeFile(t, dir, ".env", "A=1\nNEWK=v\n")
+	git(t, dir, "add", ".env.example")
+	git(t, dir, "commit", "-qm", "init")
+
+	writeFile(t, dir, ".env.example", "A=\nB=\n") // edit, then stage it fully
+	git(t, dir, "add", ".env.example")
+	writeFile(t, dir, "f", "x\n")
+	git(t, dir, "add", "f")
+
+	withAnswer(t, prompt.AnswerYes)
+	code, _, errOut := captureOutErr(t, RunPreCommit)
+	if code != 0 {
+		t.Fatalf("RunPreCommit returned %d, want 0", code)
+	}
+	git(t, dir, "commit", "-qm", "c")
+
+	head := git(t, dir, "show", "HEAD:.env.example")
+	if !strings.Contains(head, "NEWK=") {
+		t.Fatalf("fully staged .env.example must still get the fix committed, HEAD:.env.example=%q", head)
+	}
+	if !strings.Contains(errOut, "included it in this commit") {
+		t.Fatalf("errOut must say included in this commit, got %q", errOut)
 	}
 }
