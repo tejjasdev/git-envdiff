@@ -132,6 +132,12 @@ func RunPreCommit() int {
 
 	switch ask(missing, dirPush, true) {
 	case prompt.AnswerYes:
+		rel, inRepo := exampleStageTarget(p)
+		unstaged := false
+		if inRepo && !isPartialCommit() {
+			// On error (unknown state) keep the old behaviour: stage.
+			unstaged, _ = gitutil.HasUnstagedChanges(rel)
+		}
 		if err := envfile.AppendBlankKeys(p.example(), missing); err != nil {
 			silentFail(err)
 			return 0
@@ -140,10 +146,16 @@ func RunPreCommit() int {
 		case isPartialCommit():
 			warnf("added %s to .env.example, but this is a partial commit (git commit <path>), so it was NOT staged. Run `git add %s` and commit it.",
 				joinKeys(missing), exampleFile)
+		case !inRepo:
+			warnf("added %s to .env.example, but it is a symlink to a file outside this repository, so nothing was staged.",
+				joinKeys(missing))
+		case unstaged:
+			warnf("added %s to .env.example, but it already had uncommitted changes, so it was NOT staged. Review it, run `git add %s`, and commit.",
+				joinKeys(missing), rel)
 		default:
-			if err := gitutil.Add(p.example()); err != nil {
+			if err := gitutil.Add(rel); err != nil {
 				warnf("added %s to .env.example, but could not stage it automatically (%v). Run `git add %s`.",
-					joinKeys(missing), err, exampleFile)
+					joinKeys(missing), err, rel)
 			} else {
 				warnf("added %s to .env.example and included it in this commit.", joinKeys(missing))
 			}
@@ -157,6 +169,29 @@ func RunPreCommit() int {
 		_ = state.Snooze(p.GitDir, dirPush, fp)
 	}
 	return 0
+}
+
+// exampleStageTarget resolves where the .env.example content really lives
+// (following symlinks, falling back to the plain path when resolution
+// fails) and returns that path relative to the repository root,
+// slash-separated for git. inRepo is false when the resolved target lies
+// outside the repository (e.g. a symlink to a file elsewhere) — nothing
+// can be staged then. The root is resolved too, so macOS /var vs
+// /private/var or Windows short names cannot break the comparison.
+func exampleStageTarget(p Paths) (rel string, inRepo bool) {
+	target := p.example()
+	if r, err := filepath.EvalSymlinks(target); err == nil {
+		target = r
+	}
+	root := p.RepoRoot
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		root = r
+	}
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return filepath.ToSlash(rel), true
 }
 
 // isPartialCommit reports whether Git is committing through a temporary
