@@ -320,3 +320,78 @@ func TestStatus_ReflectsRepoInstallState(t *testing.T) {
 		t.Fatalf("expected status to reflect the repo install, got:\n%s", after)
 	}
 }
+
+func TestInstall_RepoOnlyReportsErrorWhenAHookCannotBeInstalled(t *testing.T) {
+	dir := newIsolatedRepo(t)
+	nodeHook := "#!/usr/bin/env node\nconsole.log('hi')\n"
+	prePush := filepath.Join(dir, ".git", "hooks", "pre-push")
+	if err := os.WriteFile(prePush, []byte(nodeHook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Install(true)
+	if err == nil {
+		t.Fatalf("Install(true) must return an error when a hook could not be installed, got nil; messages=%v", res.Messages)
+	}
+	for _, ev := range []string{"pre-commit", "post-merge", "post-checkout"} {
+		if !strings.Contains(readFile(t, filepath.Join(dir, ".git", "hooks", ev)), beginMarker) {
+			t.Fatalf("%s must contain the managed block (hooks that could be installed stay installed, no rollback)", ev)
+		}
+	}
+	if got := readFile(t, prePush); got != nodeHook {
+		t.Fatalf("the node pre-push hook must be byte-identical, got %q", got)
+	}
+
+	// idempotent: once the blocker is removed, re-running must succeed
+	if err := os.Remove(prePush); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Install(true); err != nil {
+		t.Fatalf("re-run after removing the blocker must succeed, got %v", err)
+	}
+}
+
+func TestInstall_PartialFailureStillShowsOldGitNote(t *testing.T) {
+	if gitutil.SupportsConfigHooks() {
+		t.Skip("only relevant when the installed Git lacks config-based hooks (< 2.54)")
+	}
+	dir := newIsolatedRepo(t)
+	nodeHook := "#!/usr/bin/env node\nconsole.log('hi')\n"
+	if err := os.WriteFile(filepath.Join(dir, ".git", "hooks", "pre-push"), []byte(nodeHook), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Install(false)
+	if err == nil {
+		t.Fatal("expected a non-nil error on partial failure")
+	}
+	found := false
+	for _, m := range res.Messages {
+		if strings.Contains(m, "Git < 2.54") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected the Git < 2.54 note even on partial failure, messages=%v", res.Messages)
+	}
+}
+
+func TestInstall_HooksPathCaseStillSucceeds(t *testing.T) {
+	if gitutil.SupportsConfigHooks() {
+		t.Skip("only relevant when the installed Git lacks config-based hooks (< 2.54)")
+	}
+	dir := newIsolatedRepo(t)
+	runGit(t, dir, "config", "core.hooksPath", ".husky")
+
+	res, err := Install(false)
+	if err != nil {
+		t.Fatalf("hooksPath case must keep succeeding (nil error), got %v (messages=%v)", err, res.Messages)
+	}
+	joined := strings.Join(res.Messages, "\n")
+	if !strings.Contains(joined, "core.hooksPath") {
+		t.Fatalf("expected the manual-line messages, got %v", res.Messages)
+	}
+	if !strings.Contains(joined, "Git < 2.54") {
+		t.Fatalf("expected the Git < 2.54 note in the hooksPath case too, got %v", res.Messages)
+	}
+}
