@@ -136,3 +136,18 @@ func Add(path string) error {
 	_, err := run("add", "--", path)
 	return err
 }
+
+// HasUnstagedChanges reports whether path differs between the working tree
+// and the index. An untracked path reports false (nothing to compare).
+func HasUnstagedChanges(path string) (bool, error) {
+	cmd := exec.Command("git", "diff", "--quiet", "--", path)
+	err := cmd.Run()
+	if err == nil {
+		return false, nil
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == 1 {
+		return true, nil
+	}
+	return false, err
+}
