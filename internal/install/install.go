@@ -170,6 +170,32 @@ func block(event string) string {
 		endMarker + "\n"
 }
 
+// isPOSIXShellShebang reports whether a shebang line names a POSIX shell
+// (the managed block is POSIX syntax). "env" forms resolve to the first
+// non-flag, non-assignment argument, e.g. "#!/usr/bin/env -S bash -e".
+func isPOSIXShellShebang(line string) bool {
+	f := strings.Fields(strings.TrimPrefix(strings.TrimSpace(line), "#!"))
+	if len(f) == 0 {
+		return false
+	}
+	prog := filepath.Base(f[0])
+	if prog == "env" {
+		prog = ""
+		for _, a := range f[1:] {
+			if strings.HasPrefix(a, "-") || strings.Contains(a, "=") {
+				continue
+			}
+			prog = filepath.Base(a)
+			break
+		}
+	}
+	switch prog {
+	case "sh", "bash", "dash", "ash", "zsh", "ksh":
+		return true
+	}
+	return false
+}
+
 // installIntoFile adds the managed block to path, right after its shebang
 // line. If the file doesn't exist yet, it is created with a plain POSIX
 // shebang. If it exists but isn't a recognizable shell script, nothing is
@@ -194,8 +220,7 @@ func installIntoFile(path, event string) error {
 	if len(lines) == 0 || !strings.HasPrefix(lines[0], "#!") {
 		return fmt.Errorf("existing hook has no recognizable #! shebang; add manually:\n    %s", guardedCommand(event))
 	}
-	shebang := strings.ToLower(lines[0])
-	if !strings.Contains(shebang, "sh") {
+	if !isPOSIXShellShebang(lines[0]) {
 		return fmt.Errorf("existing hook is not a shell script (%s); add manually:\n    %s",
 			strings.TrimSpace(lines[0]), guardedCommand(event))
 	}
