@@ -27,4 +27,6 @@ jobs:
       # that the Go standard library we build against has no known issues
       # that we actually call.
       - name: govulncheck
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        # Pinned deliberately (not @latest). Bump by hand after reading the release notes,
+        # and only to a release at least two weeks old. Dependabot cannot update this line.
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
