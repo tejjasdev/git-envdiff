@@ -395,3 +395,94 @@ func TestInstall_HooksPathCaseStillSucceeds(t *testing.T) {
 		t.Fatalf("expected the Git < 2.54 note in the hooksPath case too, got %v", res.Messages)
 	}
 }
+
+func TestInstallIntoFile_RefusesFishAndPwshHooks(t *testing.T) {
+	for _, shebang := range []string{"#!/usr/bin/env fish", "#!/usr/bin/env pwsh", "#!/bin/tcsh"} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "pre-commit")
+		original := shebang + "\necho custom\n"
+		if err := os.WriteFile(path, []byte(original), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := installIntoFile(path, "pre-commit"); err == nil {
+			t.Fatalf("%s: expected an error (non-POSIX hook), got nil", shebang)
+		}
+		if got := readFile(t, path); got != original {
+			t.Fatalf("%s: file must be byte-identical, got %q", shebang, got)
+		}
+	}
+}
+
+func TestInstallIntoFile_AcceptsPOSIXShellVariants(t *testing.T) {
+	for _, shebang := range []string{"#!/bin/sh", "#!/usr/bin/env bash", "#!/usr/bin/env -S bash -e", "#!/bin/sh\r"} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "pre-commit")
+		original := shebang + "\necho custom\n"
+		if err := os.WriteFile(path, []byte(original), 0o755); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := installIntoFile(path, "pre-commit"); err != nil {
+			t.Fatalf("%q: POSIX shell hook must be accepted, got %v", shebang, err)
+		}
+		content := readFile(t, path)
+		if !strings.Contains(content, beginMarker) {
+			t.Fatalf("%q: managed block missing, got:\n%s", shebang, content)
+		}
+		if !strings.Contains(content, "echo custom") {
+			t.Fatalf("%q: existing content lost, got:\n%s", shebang, content)
+		}
+	}
+}
+
+func TestInstall_OutsideRepoShowsNoOldGitNote(t *testing.T) {
+	if gitutil.SupportsConfigHooks() {
+		t.Skip("only relevant when the installed Git lacks config-based hooks (< 2.54)")
+	}
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir() // not a git repository
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(old) })
+
+	res, err := Install(false)
+	if err == nil {
+		t.Fatal("Install outside a repository must return an error")
+	}
+	for _, m := range res.Messages {
+		if strings.Contains(m, "Git < 2.54") {
+			t.Fatalf("the Git < 2.54 note must not appear when there is nothing to install, messages=%v", res.Messages)
+		}
+	}
+}
+
+func TestIsPOSIXShellShebang(t *testing.T) {
+	cr := string(rune(13))
+	trueCases := []string{
+		"#!/bin/sh", "#!/bin/sh -e", "#! /bin/bash", "#!/usr/bin/env bash",
+		"#!/usr/bin/env -S bash -e", "#!/bin/zsh", "#!/bin/sh" + cr,
+		"#!/usr/bin/env FOO=1 sh", "#!/bin/dash", "#!/bin/ash", "#!/bin/ksh",
+	}
+	for _, tc := range trueCases {
+		if !isPOSIXShellShebang(tc) {
+			t.Errorf("expected true for %q", tc)
+		}
+	}
+	falseCases := []string{
+		"#!/usr/bin/env fish", "#!/usr/bin/env pwsh", "#!/bin/tcsh", "#!/bin/csh",
+		"#!/usr/bin/env python3", "#!/usr/bin/env node", "#!/usr/bin/perl",
+		"#!/usr/bin/env ruby", "#!", "#!/usr/bin/env", "#!/usr/bin/env -S",
+		"#!/bin/busybox sh", "#!/bin/shell",
+	}
+	for _, fc := range falseCases {
+		if isPOSIXShellShebang(fc) {
+			t.Errorf("expected false for %q", fc)
+		}
+	}
+}
