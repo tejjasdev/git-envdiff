@@ -64,7 +64,7 @@ func Install(repoOnly bool) (Result, error) {
 		return installGlobal()
 	}
 	res, err := installRepo()
-	if err == nil && !repoOnly {
+	if !repoOnly && (err == nil || len(res.Messages) > 0) {
 		res.Messages = append(res.Messages,
 			"Note: Git < 2.54 detected, so this only installed into the current repository.",
 			"Run `git-envdiff install` again in each repository, or upgrade Git to 2.54+ for a one-time global install.",
@@ -153,6 +153,11 @@ func installRepo() (Result, error) {
 	}
 	res.Messages = append(res.Messages, "Installed into this repository's .git/hooks (existing hooks were preserved).")
 	res.Messages = append(res.Messages, problems...)
+	if len(problems) > 0 {
+		// Hooks that could be installed stay installed (no rollback), but
+		// the caller must see a non-nil error so the CLI exits non-zero.
+		return res, fmt.Errorf("%d hook(s) could not be installed automatically (see above)", len(problems))
+	}
 	return res, nil
 }
 
