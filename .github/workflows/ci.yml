@@ -46,10 +46,14 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      - name: Show the runner's Git version
+        run: git --version
+
       - name: go test
         # The Git-2.54-only tests skip themselves on older Git (see
         # internal/install/install_test.go), so this passes on whatever Git
-        # version each runner image ships.
+        # version each runner image ships; the git-config-hooks job below
+        # guarantees those tests actually run in CI.
         run: go test ./... -race -count=1
 
       - name: gofmt check (Linux only)
@@ -61,6 +65,40 @@ jobs:
             echo "$unformatted"
             exit 1
           fi
+
+  git-config-hooks:
+    name: git-config-hooks (Git 2.54.0 from source)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          check-latest: true
+          cache: false
+      - name: Build Git 2.54.0 from source
+        shell: bash
+        run: |
+          [ -f /usr/include/zlib.h ] || { sudo apt-get update && sudo apt-get install -y --no-install-recommends zlib1g-dev; }
+          git clone --quiet --depth 1 --branch v2.54.0 https://github.com/git/git "$RUNNER_TEMP/git-src"
+          test "$(git -C "$RUNNER_TEMP/git-src" rev-parse HEAD)" = 94f057755b7941b321fd11fec1b2e3ca5313a4e0
+          make -C "$RUNNER_TEMP/git-src" -j"$(nproc)" prefix="$HOME/git-2.54" NO_GETTEXT=1 NO_OPENSSL=1 NO_CURL=1 NO_EXPAT=1 NO_TCLTK=1 NO_PERL=1 NO_PYTHON=1 install
+          echo "$HOME/git-2.54/bin" >> "$GITHUB_PATH"
+      - name: Configure a test identity for Git
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "CI"
+      - name: Run the Git 2.54 config-hook tests
+        shell: bash
+        run: |
+          v="$(git --version)"; echo "$v"
+          [ "$v" = "git version 2.54.0" ] || { echo "ERROR: expected Git 2.54.0, got $v"; exit 1; }
+          go test ./internal/install/ -run 'TestInstall_GlobalConfigHooksRoundtrip|TestInstall_RepoFlagForcesRepoHooksEvenOnNewGit' -count=1 -v | tee "$RUNNER_TEMP/out.txt"
+          if grep -q -- '--- SKIP' "$RUNNER_TEMP/out.txt"; then echo "ERROR: a Git 2.54 test was skipped"; exit 1; fi
+          [ "$(grep -c -- '--- PASS' "$RUNNER_TEMP/out.txt")" -eq 2 ] || { echo "ERROR: expected exactly 2 PASS lines"; exit 1; }
 
   min-go:
     name: min-go (1.22)
