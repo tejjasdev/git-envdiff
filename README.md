@@ -152,10 +152,12 @@ assumed — is in **[docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md)**.
 This is the part that matters most for a tool that reads your `.env` file
 and runs automatically during Git commands:
 
-- **git-envdiff reads variable *names* only.** It never reads, logs,
-  prints, or stores a value from your `.env` file. This is enforced by the
-  file-handling code itself (see [`internal/envfile`](internal/envfile)) —
-  there is no code path that copies a `.env` value anywhere.
+- **git-envdiff reads variable *names* only.** It never stores, logs,
+  prints, or writes a value from your `.env` file. The parser does read
+  each line, to find the variable name — but nothing derived from a value
+  is kept after the scan. This is enforced by the file-handling code itself
+  (see [`internal/envfile`](internal/envfile)) — there is no code path that
+  copies a `.env` value anywhere.
 - **It only ever appends a bare `KEY=` line to `.env.example`.** Never a
   value, never a reorder, never a rewrite of existing lines.
 - **No network access, ever, except `git-envdiff update`** — and even that
@@ -167,8 +169,9 @@ and runs automatically during Git commands:
   GUI Git client doesn't share with your shell), every hook silently does
   nothing rather than breaking your commits — verified in
   [`internal/install`](internal/install)'s test suite.
-- **A crash inside git-envdiff never fails your Git command.** Every hook
-  exits `0` except in one specific case: accepting a fix at `pre-push` time
+- **A crash inside git-envdiff never fails your Git command.** Hooks catch
+  an unexpected internal error, print one warning line, and exit `0`. Every
+  hook exits `0` except in one specific case: accepting a fix at `pre-push` time
   intentionally stops the push, because the fix can't retroactively join
   commits that are already being pushed — see
   [docs/HOW_IT_WORKS.md](docs/HOW_IT_WORKS.md) for why.
@@ -217,6 +220,25 @@ your project is in, on purpose.
 **What if I don't want to be asked about a particular variable?**
 Answer `l` (local-only) at the prompt, or run `GIT_ENVDIFF_SKIP=1` for a
 single command. Both are documented above.
+
+**How do I undo an `l` (local-only) answer?**
+Local-only names are stored one per line in `.git/git-envdiff-local` inside
+the repository, and `git-envdiff status` lists them. Delete a line (or the
+whole file) and that variable is proposed again. An `l` answer applies to
+every variable named in that prompt.
+
+**Which `.env` syntax does it understand?**
+Lines like `NAME=value`, optionally prefixed with `export` and with spaces
+around `=`. Names are letters, digits and underscores and cannot start with
+a digit. Names with dots or hyphens, and lines like `NAME: value`, are
+ignored. See [What counts as a variable](docs/HOW_IT_WORKS.md#what-counts-as-a-variable)
+in `docs/HOW_IT_WORKS.md` for details and limits.
+
+**What does "NOT staged" in a pre-commit message mean?**
+`git-envdiff` added the name to `.env.example` but did not stage it, because
+the commit is partial (`git commit` with a path), `.env.example` already had
+other uncommitted changes, or it is a symlink to a file outside the
+repository. Review the file, run `git add`, then commit.
 
 **Does this replace `dotenv`, `dotenvx`, or a `.env` loader?**
 No — git-envdiff never loads environment variables into a process. It only

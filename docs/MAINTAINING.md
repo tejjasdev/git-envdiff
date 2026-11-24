@@ -39,7 +39,12 @@ release job runs.
   version` stops proposals for one upgrade you don't want.
 - The Go module has no third-party dependencies, so there is nothing else
   to update. The `vulncheck` workflow runs weekly to catch newly published
-  advisories against the Go standard library.
+  advisories against the Go standard library. It runs `govulncheck` at a
+  pinned version (currently `v1.9.0`); Dependabot cannot update that line —
+  bump it by hand after reading the release notes, and only to a release at
+  least two weeks old. The `git-config-hooks` CI job builds Git `v2.54.0`
+  from source and checks the tag commit; when you raise the minimum
+  supported Git, change the version and the commit SHA together.
 
 ## One-time repository settings
 
@@ -66,7 +71,8 @@ release job runs.
 - `main`: restrict deletions, block force pushes, require the status checks
   `test (ubuntu-latest)`, `test (macos-latest)`, `min-go (1.22)`,
   `network-boundary` and `shellcheck` (they appear in the picker after
-  they have run once). Requiring pull requests is optional for a
+  they have run once); `git-config-hooks (Git 2.54.0 from source)` can be
+  required too (optional). Requiring pull requests is optional for a
   single-maintainer project; keep admin bypass so you can't lock yourself out.
 - Tags matching `v*`: restrict deletions and block updates, so a published
   release can't be rewritten.
