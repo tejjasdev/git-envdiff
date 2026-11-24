@@ -119,6 +119,13 @@ fallback does not guess at that directory's structure. It prints the one
 line to add by hand instead, rather than writing into a hook layout it
 doesn't understand.
 
+The block is inserted only into hooks whose first line names a POSIX shell
+— `sh`, `bash`, `dash`, `ash`, `zsh` or `ksh`, directly or through `env`
+(including `env -S` and `VAR=value` forms). A hook in any other language
+(fish, PowerShell, csh, Python, Node, …) or with no shebang is left
+untouched; `install` prints the line to add by hand, still installs the
+other hooks, and exits `1`.
+
 ### Why not `core.hooksPath` or `init.templateDir` globally
 
 A global `core.hooksPath` silently stops Git from reading a repository's
@@ -139,10 +146,38 @@ Neither is used.
   There is no function in the codebase capable of writing a value there.
 - **Writing `.env`:** values copied in come only from `.env.example`
   itself — a file already committed to version control — never from
-  anywhere else.
+  anywhere else. A value is copied exactly as written in `.env.example`,
+  including quotes and any trailing comment; an `export` keyword is not
+  copied. A multi-line quoted value in the template is copied as a blank
+  value (`NAME=`).
 - **Every write is append-only and atomic**: a temp file in the same
   directory, then a rename. A crash mid-write can't leave a half-written
   file behind.
+- **Symlinks:** if `.env` or `.env.example` is a symlink, the append goes to
+  the file it points to and the link stays a link. The temporary file is
+  created next to the target, so that directory must be writable.
+
+## What counts as a variable
+
+- **Recognized:** optional leading whitespace, optional `export`, a name of
+  letters, digits and underscores that does not start with a digit, and
+  optional spaces around `=`. Names are case-sensitive.
+- **Ignored:** comment lines, names with dots or hyphens, `NAME: value`
+  lines, and names starting with a digit.
+- A name that appears more than once counts once (the first occurrence).
+  A leading BOM and CRLF line endings are handled.
+- A single line longer than 10 MiB cannot be read. Hooks print a warning
+  and exit `0`; plain `git-envdiff` reports an error naming the file and
+  exits `1` — it never says "in sync" when it could not read a file.
+- A value that opens a quote and does not close it on the same line is
+  multi-line: lines inside it are skipped until the closing quote, so PEM
+  keys or base64 blocks are not mistaken for variables. Inside double
+  quotes a backslash escapes the next character (an escaped quote does not
+  close the value); single quotes have no escapes.
+- A quote that is never closed before the end of the file is treated as an
+  ordinary single-line value, so variables after it are still found.
+  Accepted limit: an even number of stray quotes pair up and the text
+  between them is skipped.
 
 ## When it prompts, and when it only prints
 
@@ -163,10 +198,23 @@ staged into the commit in both. `git commit <path>` uses a temporary
 warns, because staging into a temporary index would leave the real index and
 the commit disagreeing.
 
+Before appending, git-envdiff checks whether `.env.example` already has
+unstaged changes. If it does, the name is appended but **not staged**, and a
+warning says to review the file and run `git add`; otherwise the fix is
+staged as before. This one extra `git` call happens only after you answer
+`y`. `git commit -a` stages tracked changes anyway, so there the whole file
+is committed.
+
+If `.env.example` is a symlink to a file inside the repository, that target
+is what gets staged and the link is unchanged; if it points outside the
+repository, nothing is staged and a warning says so.
+
 ## State per repository
 
-Two small files live under `.git/` (never in a tracked file, so they're
-local to your clone):
+Three small files live under `.git/` (never in a tracked file, so they're
+local to your clone): `.git/git-envdiff-snooze`, `.git/git-envdiff-local`,
+and `.git/git-envdiff-disabled` (created by `git-envdiff off`, removed by
+`on`):
 
 - **A snooze list** — a fingerprint of "this exact set of missing keys, in
   this direction" for any diff you've declined, so the same unchanged diff
@@ -184,7 +232,16 @@ local to your clone):
 - **A local-only list** — variable names you've explicitly marked (the `l`
   answer) as never worth proposing for `.env.example`. `.env` legitimately
   holds machine-specific values that don't belong in a shared template,
-  and without this, every commit would keep nagging about them.
+  and without this, every commit would keep nagging about them. Delete a
+  line (or the whole file) to be asked about that variable again;
+  `git-envdiff status` lists them. An `l` answer covers every variable
+  named in that prompt.
+
+## Exit codes
+
+Hooks exit `0` even on an internal error or panic, except `pre-push` after
+you accept a fix (it stops the push). Plain `git-envdiff` exits `1` when a
+file cannot be read. `install` exits `1` if any hook could not be installed.
 
 ## What's been verified, and what hasn't
 
@@ -194,7 +251,10 @@ Verified against real Git (2.43 and 2.54) and the compiled binary:
 - accepted fixes landing in plain, `-a`, and pathspec commits as described, driven through a real pseudo-terminal (not a mock), including the `y` / `N` / `l` answers and the `pre-push` block;
 - a no-difference hook run spawning no `git` subprocess at all (there is a test for this) and taking roughly 2 ms end to end, most of which is process start-up;
 - `install.sh` running under `dash` (what `| sh` means on Debian/Ubuntu), including rejecting a tampered download;
-- `install.ps1` executing under PowerShell 7, including resolving the latest tag from GitHub's redirect and rejecting a tampered download.
+- `install.ps1` executing under PowerShell 7, including resolving the latest tag from GitHub's redirect and rejecting a tampered download;
+- `install.sh` and `install.ps1` refusing to continue when no release is published (a clear error, nothing downloaded);
+- a CI job building Git 2.54.0 from source and running the config-hook
+  install tests, which skip on older Git elsewhere.
 
 Not yet verified on real hardware:
 
